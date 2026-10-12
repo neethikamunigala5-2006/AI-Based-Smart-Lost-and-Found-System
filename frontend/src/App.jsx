@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 
-const API_URL = 'http://localhost:8080/api/items'
-const AUTH_API_URL = 'http://localhost:8080/api/auth'
+const BACKEND_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8080').replace(/\/+$/, '')
+const API_URL = `${BACKEND_URL}/api/items`
+const AUTH_API_URL = `${BACKEND_URL}/api/auth`
 const TOKEN_STORAGE_KEY = 'campusFindToken'
 const USER_STORAGE_KEY = 'campusFindUser'
 const SESSION_EXPIRED_EVENT = 'campusFind:session-expired'
@@ -140,7 +141,7 @@ function NotificationBell({ userId, forceOpen = false }) {
     if (unreadRequestInFlightRef.current || !mountedRef.current) return
     unreadRequestInFlightRef.current = true
     try {
-      const unread = await request(`http://localhost:8080/api/notifications/user/${userId}/unread`)
+      const unread = await request(`${BACKEND_URL}/api/notifications/user/${userId}/unread`)
       if (mountedRef.current) setUnreadCount(unread.length)
     } catch {
       if (mountedRef.current) setError('Unable to load notifications.')
@@ -155,7 +156,7 @@ function NotificationBell({ userId, forceOpen = false }) {
     if (showLoading) setLoading(true)
     setError('')
     try {
-      const allNotifications = await request(`http://localhost:8080/api/notifications/user/${userId}`)
+      const allNotifications = await request(`${BACKEND_URL}/api/notifications/user/${userId}`)
       if (!mountedRef.current) return
       setNotifications(allNotifications)
     } catch {
@@ -196,7 +197,7 @@ function NotificationBell({ userId, forceOpen = false }) {
     if (notification.read) return
     setError('')
     try {
-      await request(`http://localhost:8080/api/notifications/${notification.id}/read`, {
+      await request(`${BACKEND_URL}/api/notifications/${notification.id}/read`, {
         method: 'PUT',
       })
       if (!mountedRef.current) return
@@ -213,7 +214,7 @@ function NotificationBell({ userId, forceOpen = false }) {
     if (unreadCount === 0) return
     setError('')
     try {
-      await request(`http://localhost:8080/api/notifications/user/${userId}/read-all`, {
+      await request(`${BACKEND_URL}/api/notifications/user/${userId}/read-all`, {
         method: 'PUT',
       })
       if (!mountedRef.current) return
@@ -858,7 +859,7 @@ function App() {
       const allItems = await request(API_URL)
       const itemIds = [...new Set(allItems.map((item) => item.id))]
       const claimLists = await Promise.all(
-        itemIds.map((itemId) => request(`http://localhost:8080/api/claims/item/${itemId}`))
+        itemIds.map((itemId) => request(`${BACKEND_URL}/api/claims/item/${itemId}`))
       )
       const itemStatuses = new Map(allItems.map((item) => [item.id, item.status]))
       const claims = claimLists.flat().map((claim) => ({
@@ -885,7 +886,7 @@ function App() {
       setUserClaimsError('')
     }
     try {
-      const claims = await request(`http://localhost:8080/api/claims/user/${authUser.id}`)
+      const claims = await request(`${BACKEND_URL}/api/claims/user/${authUser.id}`)
       setUserClaims(claims)
     } catch (claimsError) {
       if (!silent) setUserClaimsError(claimsError.message)
@@ -1039,7 +1040,7 @@ function App() {
   async function submitClaim(item, verificationDetails) {
     setClaimBusy(true)
     try {
-      await request('http://localhost:8080/api/claims', {
+      await request(`${BACKEND_URL}/api/claims`, {
         method: 'POST',
         body: JSON.stringify({
           itemId: item.id,
@@ -1074,7 +1075,7 @@ function App() {
     setClaimStatusError('')
     setNotice('')
     try {
-      await request(`http://localhost:8080/api/claims/${claimId}/status`, {
+      await request(`${BACKEND_URL}/api/claims/${claimId}/status`, {
         method: 'PUT',
         body: JSON.stringify({ status }),
       })
