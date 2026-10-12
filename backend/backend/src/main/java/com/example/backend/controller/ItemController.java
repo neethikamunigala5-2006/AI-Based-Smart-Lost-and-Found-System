@@ -34,7 +34,11 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/items")
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = {
+        "http://localhost:5173",
+        "https://ai-based-smart-lost-and-found-syste.vercel.app",
+        "https://ai-based-smart-lost-and-found-system-7su837jvy-neethika.vercel.app"
+})
 public class ItemController {
 
     private final ItemService itemService;
