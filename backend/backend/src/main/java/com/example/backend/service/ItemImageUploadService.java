@@ -5,6 +5,9 @@ import com.example.backend.entity.Item;
 import com.example.backend.exception.ImageUploadException;
 import com.example.backend.exception.ResourceNotFoundException;
 import com.example.backend.repository.ItemRepository;
+import com.cloudinary.Cloudinary;
+import com.cloudinary.utils.ObjectUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -12,9 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -23,20 +25,39 @@ public class ItemImageUploadService {
     private static final long DEFAULT_MAX_FILE_SIZE = 5L * 1024 * 1024;
 
     private final ItemRepository itemRepository;
-    private final Path uploadDirectory;
-    private final String publicUrlBase;
     private final long maxFileSize;
+    private final Optional<Cloudinary> cloudinary;
 
+    @Autowired
     public ItemImageUploadService(
             ItemRepository itemRepository,
-            @Value("${app.upload.directory:uploads}") String uploadDirectory,
-            @Value("${app.upload.public-url-base:http://localhost:8080/uploads}") String publicUrlBase,
+            @Value("${CLOUDINARY_CLOUD_NAME:}") String cloudName,
+            @Value("${CLOUDINARY_API_KEY:}") String apiKey,
+            @Value("${CLOUDINARY_API_SECRET:}") String apiSecret,
             @Value("${app.upload.max-file-size:5242880}") long maxFileSize
     ) {
+        this(
+                itemRepository,
+                cloudName.isBlank() || apiKey.isBlank() || apiSecret.isBlank()
+                        ? Optional.empty()
+                        : Optional.of(new Cloudinary(Map.of(
+                                "cloud_name", cloudName,
+                                "api_key", apiKey,
+                                "api_secret", apiSecret,
+                                "secure", true
+                        ))),
+                maxFileSize
+        );
+    }
+
+    ItemImageUploadService(
+            ItemRepository itemRepository,
+            Optional<Cloudinary> cloudinary,
+            long maxFileSize
+    ) {
         this.itemRepository = itemRepository;
-        this.uploadDirectory = Path.of(uploadDirectory).toAbsolutePath().normalize();
-        this.publicUrlBase = publicUrlBase.replaceAll("/+$", "");
         this.maxFileSize = maxFileSize > 0 ? maxFileSize : DEFAULT_MAX_FILE_SIZE;
+        this.cloudinary = cloudinary;
     }
 
     @Transactional
@@ -60,23 +81,37 @@ public class ItemImageUploadService {
                     "Unsupported image file. Upload a JPG, JPEG, PNG, or WEBP image.");
         }
 
-        Files.createDirectories(uploadDirectory);
-        String filename = "item-" + itemId + "-" + UUID.randomUUID() + "." + extension;
-        Path destination = uploadDirectory.resolve(filename).normalize();
-        if (!destination.getParent().equals(uploadDirectory)) {
-            throw new IllegalStateException("Image upload path is invalid.");
-        }
+        Cloudinary configuredCloudinary = cloudinary.orElseThrow(() ->
+                new ImageUploadException(HttpStatus.SERVICE_UNAVAILABLE,
+                        "Image uploads are not configured."));
 
-        Files.write(destination, content, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-        String imageUrl = publicUrlBase + "/" + filename;
-        item.setImageUrl(imageUrl);
-
+        String imageUrl;
         try {
-            itemRepository.save(item);
-        } catch (RuntimeException exception) {
-            Files.deleteIfExists(destination);
-            throw exception;
+            Map<?, ?> uploadResult = configuredCloudinary.uploader().upload(
+                    content,
+                    ObjectUtils.asMap(
+                            "resource_type", "image",
+                            "folder", "lost-and-found/items",
+                            "public_id", "item-" + itemId + "-" + UUID.randomUUID(),
+                            "format", extension
+                    )
+            );
+            Object secureUrl = uploadResult.get("secure_url");
+            if (!(secureUrl instanceof String url) || !url.startsWith("https://")) {
+                throw new ImageUploadException(HttpStatus.BAD_GATEWAY,
+                        "Image storage did not return a secure image URL.");
+            }
+            imageUrl = url;
+        } catch (IOException | RuntimeException exception) {
+            if (exception instanceof ImageUploadException imageUploadException) {
+                throw imageUploadException;
+            }
+            throw new ImageUploadException(HttpStatus.BAD_GATEWAY,
+                    "Image upload failed. Please try again.");
         }
+
+        item.setImageUrl(imageUrl);
+        itemRepository.save(item);
 
         return new ItemImageUploadResponse(itemId, imageUrl, "Image uploaded successfully.");
     }
